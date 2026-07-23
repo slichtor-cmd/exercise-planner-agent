@@ -1,0 +1,23 @@
+# GCP Cloud Build CI/CD Presubmit Pipeline
+steps:
+  # Step 1: Run pytest unit & integration test suites
+  - name: 'python:3.11'
+    entrypoint: 'pytest'
+    args: ['tests/']
+
+  # Step 2: Run ADK evaluation benchmark scoring
+  - name: 'python:3.11'
+    entrypoint: 'python'
+    args: ['-m', 'exercise_planner_agent.run_eval']
+
+  # Step 3: Validate Terraform Infrastructure as Code
+  - name: 'hashicorp/terraform:latest'
+    dir: 'terraform'
+    args: ['init', '-backend=false']
+
+  - name: 'hashicorp/terraform:latest'
+    dir: 'terraform'
+    args: ['validate']
+
+options:
+  logging: CLOUD_LOGGING_ONLY
