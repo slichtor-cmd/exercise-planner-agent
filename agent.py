@@ -236,7 +236,8 @@ def run_agent_turn(
             new_message=msg_content,
         )
     )
-    response_text = format_event_response(events, agent.name)
+    compacted_events = compact_conversation_history(events)
+    response_text = format_event_response(compacted_events, agent.name)
 
     observability.telemetry_collector.record_agent_turn(
         agent_name=agent.name,

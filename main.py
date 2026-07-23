@@ -187,11 +187,34 @@ def run_evaluation_mode():
   return results
 
 
+class JSONLogFormatter(logging.Formatter):
+  """Custom Log Formatter formatting output as structured single-line JSON."""
+
+  def format(self, record: logging.LogRecord) -> str:
+    log_entry = {
+        "timestamp": self.formatTime(record, self.datefmt),
+        "level": record.levelname,
+        "logger": record.name,
+        "message": record.getMessage(),
+    }
+    if hasattr(record, "user_id"):
+      log_entry["user_id"] = getattr(record, "user_id")
+    if hasattr(record, "span_id"):
+      log_entry["span_id"] = getattr(record, "span_id")
+    return json.dumps(log_entry)
+
+
+def setup_structured_logging():
+  """Configures root logger with single-line JSON log formatting."""
+  root_logger = logging.getLogger()
+  root_logger.setLevel(logging.INFO)
+  handler = logging.StreamHandler(sys.stdout)
+  handler.setFormatter(JSONLogFormatter())
+  root_logger.handlers = [handler]
+
+
 def main():
-  logging.basicConfig(
-      level=logging.INFO,
-      format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-  )
+  setup_structured_logging()
   parser = argparse.ArgumentParser(
       description="Exercise Planner & Tracker Multi-Agent CLI"
   )

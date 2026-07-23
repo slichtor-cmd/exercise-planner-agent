@@ -1,19 +1,51 @@
 """Cloud Firestore Persistence Service for Exercise Planner & Tracker Agent."""
 
 import datetime
+import json
 import logging
+import os
+import sqlite3
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+DB_DIR = os.getenv("TEST_TMPDIR", os.getenv("TMPDIR", "./state"))
+try:
+  os.makedirs(DB_DIR, exist_ok=True)
+except PermissionError:
+  DB_DIR = "/tmp/state"
+  os.makedirs(DB_DIR, exist_ok=True)
+
+DB_FILE = os.path.join(DB_DIR, "workout_state.sqlite")
 
 
 class FirestoreService:
-  """Mock Cloud Firestore Service for user profiles, workout plans, and logs."""
+  """Persistence Service backing user profiles, workout plans, and logs with SQLite."""
 
   def __init__(self):
     self._user_profiles: Dict[str, Dict[str, Any]] = {}
     self._workout_plans: Dict[str, List[Dict[str, Any]]] = {}
     self._workout_logs: Dict[str, List[Dict[str, Any]]] = {}
+
+    # Initialize SQLite Persistent Storage
+    os.makedirs(DB_DIR, exist_ok=True)
+    self._conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    self._init_sqlite_tables()
+
+  def _init_sqlite_tables(self):
+    """Creates persistent SQLite database tables if missing."""
+    with self._conn:
+      self._conn.execute(
+          "CREATE TABLE IF NOT EXISTS user_profiles (user_id TEXT PRIMARY"
+          " KEY, profile_json TEXT)"
+      )
+      self._conn.execute(
+          "CREATE TABLE IF NOT EXISTS workout_plans (plan_id TEXT PRIMARY KEY,"
+          " user_id TEXT, plan_json TEXT, created_at TEXT)"
+      )
+      self._conn.execute(
+          "CREATE TABLE IF NOT EXISTS workout_logs (log_id TEXT PRIMARY KEY,"
+          " user_id TEXT, exercise_name TEXT, sets INTEGER, reps INTEGER,"
+          " weight REAL, timestamp TEXT)"
+      )
     self._catalog: List[Dict[str, Any]] = [
         # --- CHEST & PUSH ---
         {
@@ -280,7 +312,7 @@ class FirestoreService:
       equipment: str = "full_gym",
       unavailable_days: Optional[List[str]] = None,
   ) -> Dict[str, Any]:
-    """Saves customized user profile preferences."""
+    """Saves customized user profile preferences to SQLite."""
     profile = {
         "user_id": user_id,
         "goals": goals,
@@ -291,11 +323,31 @@ class FirestoreService:
         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     self._user_profiles[user_id] = profile
+
+    with self._conn:
+      self._conn.execute(
+          "INSERT OR REPLACE INTO user_profiles (user_id, profile_json) VALUES"
+          " (?, ?)",
+          (user_id, json.dumps(profile)),
+      )
+    logger.info("Persisted profile for user '%s' to SQLite database.", user_id)
     return {"status": "success", "profile": profile}
 
   def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieves saved user profile preferences."""
-    return self._user_profiles.get(user_id)
+    """Retrieves saved user profile preferences from SQLite or memory cache."""
+    if user_id in self._user_profiles:
+      return self._user_profiles[user_id]
+
+    cursor = self._conn.cursor()
+    cursor.execute(
+        "SELECT profile_json FROM user_profiles WHERE user_id = ?", (user_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+      profile = json.loads(row[0])
+      self._user_profiles[user_id] = profile
+      return profile
+    return None
 
   # --- Exercise Catalog Operations ---
   def search_exercise_catalog(
@@ -335,25 +387,49 @@ class FirestoreService:
   def save_workout_plan(
       self, user_id: str, plan: Dict[str, Any]
   ) -> Dict[str, Any]:
-    """Saves a 7-day workout plan for a given user."""
+    """Saves a workout plan for a user to SQLite."""
     p_id = f"plan_{user_id}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     record = {
         "plan_id": p_id,
         "user_id": user_id,
         "plan": plan,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "created_at": created_at,
     }
     if user_id not in self._workout_plans:
       self._workout_plans[user_id] = []
     self._workout_plans[user_id].append(record)
+
+    with self._conn:
+      self._conn.execute(
+          "INSERT INTO workout_plans (plan_id, user_id, plan_json, created_at)"
+          " VALUES (?, ?, ?, ?)",
+          (p_id, user_id, json.dumps(plan), created_at),
+      )
+    logger.info("Persisted plan '%s' for user '%s' to SQLite.", p_id, user_id)
     return {"status": "success", "plan_id": p_id}
 
   def get_latest_workout_plan(self, user_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieves the most recently saved workout plan for a user."""
-    plans = self._workout_plans.get(user_id, [])
-    if not plans:
-      return None
-    return plans[-1]
+    """Retrieves the most recently saved workout plan for a user from SQLite."""
+    if user_id in self._workout_plans and self._workout_plans[user_id]:
+      return self._workout_plans[user_id][-1]
+
+    cursor = self._conn.cursor()
+    cursor.execute(
+        "SELECT plan_id, plan_json, created_at FROM workout_plans WHERE user_id"
+        " = ? ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    if row:
+      record = {
+          "plan_id": row[0],
+          "user_id": user_id,
+          "plan": json.loads(row[1]),
+          "created_at": row[2],
+      }
+      return record
+    return None
 
   # --- Workout Log & Progress Operations ---
   def log_completed_exercise(
@@ -366,8 +442,9 @@ class FirestoreService:
       duration_minutes: int = 0,
       notes: str = "",
   ) -> Dict[str, Any]:
-    """Logs a completed exercise session."""
+    """Logs a completed exercise session to SQLite."""
     log_id = f"log_{user_id}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     entry = {
         "log_id": log_id,
         "user_id": user_id,
@@ -377,20 +454,54 @@ class FirestoreService:
         "weight": weight,
         "duration_minutes": duration_minutes,
         "notes": notes,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": timestamp,
     }
     if user_id not in self._workout_logs:
       self._workout_logs[user_id] = []
     self._workout_logs[user_id].append(entry)
+
+    with self._conn:
+      self._conn.execute(
+          "INSERT INTO workout_logs (log_id, user_id, exercise_name, sets,"
+          " reps, weight, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          (log_id, user_id, exercise_name, sets, reps, weight, timestamp),
+      )
+    logger.info(
+        "Logged exercise '%s' (%dx%d) for user '%s' in SQLite.",
+        exercise_name,
+        sets,
+        reps,
+        user_id,
+    )
     return {"status": "success", "entry": entry}
 
   def get_user_workout_history(
       self, user_id: str, limit: int = 20, time_window: Optional[str] = None
   ) -> List[Dict[str, Any]]:
-    """Retrieves historical workout logs for progress tracking."""
-    del time_window  # Reserved for future date range filter extensions
-    logs = self._workout_logs.get(user_id, [])
-    return logs[-limit:]
+    """Retrieves historical workout logs for progress tracking from SQLite."""
+    del time_window
+    if user_id in self._workout_logs and self._workout_logs[user_id]:
+      return self._workout_logs[user_id][-limit:]
+
+    cursor = self._conn.cursor()
+    cursor.execute(
+        "SELECT log_id, exercise_name, sets, reps, weight, timestamp FROM"
+        " workout_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
+        (user_id, limit),
+    )
+    rows = cursor.fetchall()
+    logs = []
+    for row in rows:
+      logs.append({
+          "log_id": row[0],
+          "user_id": user_id,
+          "exercise_name": row[1],
+          "sets": row[2],
+          "reps": row[3],
+          "weight": row[4],
+          "timestamp": row[5],
+      })
+    return logs
 
   # --- Async Memory Operations (Non-blocking DB Layer) ---
   async def async_get_user_profile(

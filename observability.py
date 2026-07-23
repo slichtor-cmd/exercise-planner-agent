@@ -1,7 +1,7 @@
 """OpenTelemetry Observability and Custom Metrics Collector."""
 
 import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class TelemetryMetricsCollector:
@@ -12,6 +12,7 @@ class TelemetryMetricsCollector:
     self._completion_tokens = 0
     self._tool_invocations: Dict[str, int] = {}
     self._active_trace_spans: Dict[str, Dict[str, Any]] = {}
+    self.active_parent_span_id: Optional[str] = None
 
   def record_token_usage(self, prompt_tokens: int, completion_tokens: int):
     """Tracks token usage metrics across agent turns."""
@@ -24,11 +25,17 @@ class TelemetryMetricsCollector:
         self._tool_invocations.get(tool_name, 0) + 1
     )
 
-  def start_trace_span(self, span_name: str, agent_name: str) -> Dict[str, Any]:
-    """Starts an OpenTelemetry trace span for sub-agent execution."""
+  def start_trace_span(
+      self,
+      span_name: str,
+      agent_name: str,
+      parent_span_id: Optional[str] = None,
+  ) -> Dict[str, Any]:
+    """Starts an OpenTelemetry trace span with parent-child span linking."""
     span_id = f"span_{span_name}_{datetime.datetime.now().timestamp()}"
     span = {
         "span_id": span_id,
+        "parent_span_id": parent_span_id or self.active_parent_span_id,
         "span_name": span_name,
         "agent_name": agent_name,
         "start_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -56,12 +63,14 @@ class TelemetryMetricsCollector:
       params: Dict[str, Any],
       outcome: Dict[str, Any],
       status: str = "SUCCESS",
+      parent_span_id: Optional[str] = None,
   ):
-    """Records paired intent vs outcome trace spans for tool calls."""
+    """Records paired intent vs outcome trace spans linked to parent turn span."""
     self.record_tool_invocation(tool_name)
     span_id = f"tool_span_{tool_name}_{datetime.datetime.now().timestamp()}"
     span = {
         "span_id": span_id,
+        "parent_span_id": parent_span_id or self.active_parent_span_id,
         "tool_name": tool_name,
         "tool_intent": params,
         "tool_outcome": outcome,
@@ -78,16 +87,18 @@ class TelemetryMetricsCollector:
       input_length: int,
       output_length: int,
   ):
-    """Records agent turn execution metrics and trace span."""
+    """Records agent turn execution metrics and sets active parent span ID."""
     span_id = f"turn_span_{agent_name}_{datetime.datetime.now().timestamp()}"
     span = {
         "span_id": span_id,
+        "parent_span_id": None,
         "agent_name": agent_name,
         "user_id": user_id,
         "input_length": input_length,
         "output_length": output_length,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    self.active_parent_span_id = span_id
     self._active_trace_spans[span_id] = span
     self.record_token_usage(
         prompt_tokens=max(1, input_length // 4),

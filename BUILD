@@ -37,6 +37,7 @@ py_library(
         "//third_party/py/google/cloud/secretmanager",
         "//third_party/py/google/genai",
         "//third_party/py/pydantic:pydantic_v2",
+        "//third_party/py/sqlite3",
         "//third_party/py/yaml",
     ],
 )
