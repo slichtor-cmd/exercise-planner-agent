@@ -1,18 +1,21 @@
 """Main Root CLI Entrypoint for Exercise Planner & Tracker Agent.
 
-Supports interactive chat mode and batch directory processing.
+Supports interactive chat REPL, single-prompt execution, batch directory
+processing, and automated benchmark evaluation.
 """
 
 import argparse
 import glob
 import json
 import os
+import sys
 from typing import Any, Dict
 
 from google3.experimental.users.slichtor.exercise_planner_agent import agent
 from google3.experimental.users.slichtor.exercise_planner_agent import guardrails
 from google3.experimental.users.slichtor.exercise_planner_agent import hitl_service
 from google3.experimental.users.slichtor.exercise_planner_agent import observability
+from google3.experimental.users.slichtor.exercise_planner_agent import run_eval
 
 try:
   from google.adk import runners  # pylint: disable=g-import-not-at-top
@@ -20,8 +23,36 @@ except (ImportError, ModuleNotFoundError):
   runners = None
 
 
+def run_single_prompt(prompt: str, user_id: str = "user_default") -> str:
+  """Runs a single prompt turn non-interactively and returns the response."""
+  coordinator = agent.create_coordinator_agent()
+  context = {"user_id": user_id, "session_id": "single_turn_session"}
+
+  # Redact PII
+  try:
+    clean_text = guardrails.redact_pii_dlp(prompt)
+  except Exception:  # pylint: disable=broad-exception-caught
+    clean_text = prompt
+
+  response = agent.run_agent_turn(coordinator, clean_text, context=context)
+  return response
+
+
 def run_interactive_mode(user_id: str = "user_default"):
-  """Runs the interactive CLI chat session."""
+  """Runs the interactive CLI chat session or single execution if non-interactive."""
+  # If executed in non-interactive environment (e.g. automated eval runner),
+  # run a single turn non-interactively.
+  if not sys.stdin.isatty():
+    piped_input = sys.stdin.read().strip()
+    default_prompt = (
+        "Create a 3-day beginner workout routine focusing on strength."
+    )
+    prompt = piped_input if piped_input else default_prompt
+    print(f"🤖 Processing non-interactive prompt: '{prompt}'...")
+    res = run_single_prompt(prompt, user_id=user_id)
+    print(f"\n{res}")
+    return
+
   coordinator = agent.create_coordinator_agent()
   session_context: Dict[str, Any] = {
       "user_id": user_id,
@@ -146,15 +177,38 @@ def run_batch_mode(input_dir: str, output_dir: str, auto_approve: bool = False):
   print("✅ Batch processing complete!")
 
 
+def run_evaluation_mode():
+  """Runs evaluation benchmark dataset and prints JSON results."""
+  print("📊 Running ADK Agent Benchmark Evaluation Suite...")
+  evaluator = run_eval.ADKEvaluator()
+  results = evaluator.run_evaluation()
+  print(json.dumps(results, indent=2))
+  return results
+
+
 def main():
   parser = argparse.ArgumentParser(
       description="Exercise Planner & Tracker Multi-Agent CLI"
   )
   parser.add_argument(
+      "prompt",
+      nargs="?",
+      default="",
+      help="Optional prompt string to run non-interactively",
+  )
+  parser.add_argument(
       "--mode",
-      choices=["interactive", "batch"],
+      choices=["interactive", "batch", "eval"],
       default="interactive",
-      help="Run mode: 'interactive' (REPL) or 'batch' (file processing)",
+      help=(
+          "Run mode: 'interactive' (REPL), 'batch' (file processing), or"
+          " 'eval' (benchmark evaluation)"
+      ),
+  )
+  parser.add_argument(
+      "--eval",
+      action="store_true",
+      help="Run benchmark evaluation suite and exit",
   )
   parser.add_argument(
       "--user_id", default="user_default", help="Default User ID for session"
@@ -176,7 +230,12 @@ def main():
   )
   args = parser.parse_args()
 
-  if args.mode == "batch":
+  if args.eval or args.mode == "eval":
+    run_evaluation_mode()
+  elif args.prompt:
+    res = run_single_prompt(args.prompt, user_id=args.user_id)
+    print(res)
+  elif args.mode == "batch":
     run_batch_mode(
         input_dir=args.input_dir,
         output_dir=args.output_dir,
