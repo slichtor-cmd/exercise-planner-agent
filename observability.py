@@ -53,8 +53,8 @@ class TelemetryMetricsCollector:
   def record_tool_intent_and_outcome(
       self,
       tool_name: str,
-      intended_params: Dict[str, Any],
-      actual_outcome: Dict[str, Any],
+      params: Dict[str, Any],
+      outcome: Dict[str, Any],
       status: str = "SUCCESS",
   ):
     """Records paired intent vs outcome trace spans for tool calls."""
@@ -63,12 +63,36 @@ class TelemetryMetricsCollector:
     span = {
         "span_id": span_id,
         "tool_name": tool_name,
-        "tool_intent": intended_params,
-        "tool_outcome": actual_outcome,
+        "tool_intent": params,
+        "tool_outcome": outcome,
         "status": status,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     self._active_trace_spans[span_id] = span
+    return span
+
+  def record_agent_turn(
+      self,
+      agent_name: str,
+      user_id: str,
+      input_length: int,
+      output_length: int,
+  ):
+    """Records agent turn execution metrics and trace span."""
+    span_id = f"turn_span_{agent_name}_{datetime.datetime.now().timestamp()}"
+    span = {
+        "span_id": span_id,
+        "agent_name": agent_name,
+        "user_id": user_id,
+        "input_length": input_length,
+        "output_length": output_length,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    self._active_trace_spans[span_id] = span
+    self.record_token_usage(
+        prompt_tokens=max(1, input_length // 4),
+        completion_tokens=max(1, output_length // 4),
+    )
     return span
 
   def get_telemetry_summary(self) -> Dict[str, Any]:

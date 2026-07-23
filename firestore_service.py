@@ -1,7 +1,10 @@
 """Cloud Firestore Persistence Service for Exercise Planner & Tracker Agent."""
 
 import datetime
+import logging
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class FirestoreService:

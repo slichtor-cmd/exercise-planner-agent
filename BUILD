@@ -33,7 +33,10 @@ py_library(
     deps = [
         "//third_party/py/google/adk",
         "//third_party/py/google/adk:runners",
-        "//third_party/py/google/cloud/aiplatform",
+        "//third_party/py/google/cloud:core",
+        "//third_party/py/google/cloud/secretmanager",
+        "//third_party/py/google/genai",
+        "//third_party/py/pydantic:pydantic_v2",
         "//third_party/py/yaml",
     ],
 )

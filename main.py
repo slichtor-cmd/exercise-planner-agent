@@ -7,6 +7,7 @@ processing, and automated benchmark evaluation.
 import argparse
 import glob
 import json
+import logging
 import os
 import sys
 from typing import Any, Dict
@@ -187,6 +188,10 @@ def run_evaluation_mode():
 
 
 def main():
+  logging.basicConfig(
+      level=logging.INFO,
+      format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+  )
   parser = argparse.ArgumentParser(
       description="Exercise Planner & Tracker Multi-Agent CLI"
   )

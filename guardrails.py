@@ -1,7 +1,10 @@
 """Security guardrails, Cloud DLP PII redaction, and fluid safety classifier."""
 
+import logging
 import sys
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
 
 try:
   from google.genai import types  # pylint: disable=g-import-not-at-top

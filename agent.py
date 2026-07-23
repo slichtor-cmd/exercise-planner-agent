@@ -1,11 +1,15 @@
 """Exercise Planner Agent Module with Multi-Agent Hierarchy."""
 
+import logging
 import pathlib
 from typing import Any, Dict
 
 from google3.experimental.users.slichtor.exercise_planner_agent import custom_functions
 from google3.experimental.users.slichtor.exercise_planner_agent import guardrails
 from google3.experimental.users.slichtor.exercise_planner_agent import hitl_service
+from google3.experimental.users.slichtor.exercise_planner_agent import observability
+
+logger = logging.getLogger(__name__)
 
 try:
   from google.adk import runners  # pylint: disable=g-import-not-at-top
@@ -216,6 +220,12 @@ def run_agent_turn(
 
     user_id = str(context.get("user_id", "user"))
     session_id = str(context.get("session_id", "session"))
+    logger.info(
+        "Running agent turn for '%s' (user_id='%s', session_id='%s')",
+        agent.name,
+        user_id,
+        session_id,
+    )
     msg_content = types.Content(
         role="user", parts=[types.Part(text=clean_input)]
     )
@@ -226,7 +236,15 @@ def run_agent_turn(
             new_message=msg_content,
         )
     )
-    return format_event_response(events, agent.name)
+    response_text = format_event_response(events, agent.name)
+
+    observability.telemetry_collector.record_agent_turn(
+        agent_name=agent.name,
+        user_id=user_id,
+        input_length=len(clean_input),
+        output_length=len(response_text),
+    )
+    return response_text
   except (RuntimeError, ValueError, AttributeError, KeyError, TypeError):
     return (
         f"🤖 [{agent.name}]: Input received for user"
