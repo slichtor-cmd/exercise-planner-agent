@@ -12,6 +12,7 @@ py_library(
         "guardrails.py",
         "hitl_service.py",
         "interactive_chat.py",
+        "main.py",
         "observability.py",
         "run_eval.py",
         "tests/__init__.py",
@@ -34,6 +35,15 @@ py_library(
         "//third_party/py/google/adk:runners",
         "//third_party/py/google/cloud/aiplatform",
         "//third_party/py/yaml",
+    ],
+)
+
+py_binary(
+    name = "main",
+    srcs = ["main.py"],
+    deps = [
+        ":exercise_planner_agent",
+        "//third_party/py/google/adk",
     ],
 )
 
